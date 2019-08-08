@@ -21,16 +21,17 @@ import java.io._
 import java.util.Locale
 import java.util.concurrent.atomic.AtomicBoolean
 
+import scala.collection.parallel.ForkJoinTaskSupport
+
 import com.amazonaws.services.kinesis.model.Record
 import org.apache.hadoop.conf.Configuration
 
-import scala.collection.parallel.ForkJoinTaskSupport
 import org.apache.spark.SparkContext
 import org.apache.spark.internal.Logging
 import org.apache.spark.sql._
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.util.DateTimeUtils
-import org.apache.spark.sql.execution.streaming.{Offset, Source, _}
+import org.apache.spark.sql.execution.streaming.{Offset, Source}
 import org.apache.spark.sql.types._
 import org.apache.spark.unsafe.types.UTF8String
 import org.apache.spark.util.{SerializableConfiguration, ThreadUtils, Utils}
