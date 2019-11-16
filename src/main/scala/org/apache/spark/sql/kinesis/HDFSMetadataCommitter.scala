@@ -17,7 +17,7 @@
 
 package org.apache.spark.sql.kinesis
 
-import java.io.{FileNotFoundException, InputStream, InputStreamReader, OutputStream}
+import java.io.{FileNotFoundException, IOException, InputStream, InputStreamReader, OutputStream}
 import java.nio.charset.StandardCharsets
 import java.util.{EnumSet, Locale}
 
@@ -27,9 +27,9 @@ import org.apache.hadoop.fs._
 import org.apache.hadoop.fs.permission.FsPermission
 import org.json4s.NoTypeHints
 import org.json4s.jackson.Serialization
+
 import scala.reflect.ClassTag
 import scala.util.control.NonFatal
-
 import org.apache.spark.internal.Logging
 import org.apache.spark.util.SerializableConfiguration
 
@@ -122,27 +122,34 @@ class HDFSMetadataCommitter[T <: AnyRef : ClassTag](path: String,
 
   override def add(batchId: Long, shardId: String, metadata: T): Boolean = {
     require(metadata != null, "'null' metadata cannot written to a shard commit log")
-    create(batchId)
-    val shardCommitPath = new Path(batchIdToPath(batchId), shardId)
-    import CreateFlag._
-    import Options._
+    withRetry("saving metadataFile") {
+      create(batchId)
+      val shardCommitPath = new Path(batchIdToPath(batchId), shardId)
+      import CreateFlag._
+      import Options._
 
-    val output = fileContext.create(shardCommitPath,
-      EnumSet.of(CREATE, OVERWRITE), CreateOpts.checksumParam(ChecksumOpt.createDisabled()))
-    try {
-      serialize(metadata, output)
-      output.close()
-    } catch {
-      case e: Throwable =>
-        // close the open stream and delete the new file added
+      val output = fileContext.create(shardCommitPath,
+        EnumSet.of(CREATE, OVERWRITE), CreateOpts.checksumParam(ChecksumOpt.createDisabled()))
+      try {
+        serialize(metadata, output)
         output.close()
-        withRetry[Boolean]("deleting cancelled metadataFile") {
-          fileContext.delete(shardCommitPath, false)
-        }
-        // throw the exception again so that the caller knows that add operation was not successful
-        throw e
+      } catch {
+        case e: Throwable =>
+          logWarning("Problem with writing metadata file", e)
+          try {
+            output.close()
+          } catch {
+            case closeExc: Throwable => logError("Problem with closing metadata file", closeExc)
+          }
+          withRetry[Boolean]("deleting cancelled metadataFile") {
+            fileContext.delete(shardCommitPath, false)
+          }
+          // throw the exception again so that the caller
+          // knows that add operation was not successful
+          throw e
+      }
+      true
     }
-    true
   }
 
   override def get(batchId: Long): Seq[T] = {
